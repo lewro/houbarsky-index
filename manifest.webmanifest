@@ -1,0 +1,18 @@
+{
+  "name": "Houbařský index",
+  "short_name": "Houby",
+  "description": "Kde v Česku teď rostou houby — počítáno ze srážek, půdní vlhkosti a teplot.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "lang": "cs",
+  "categories": ["utilities", "weather"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

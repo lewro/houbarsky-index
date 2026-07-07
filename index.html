@@ -168,10 +168,18 @@ const PAST=14, FUT=7;
 const statusEl=document.getElementById('status');
 
 async function fetchAll(){
-  const key='hix-'+new Date().toISOString().slice(0,10);
+  // Cache key includes a grid signature so a change to LON_STEP/LAT_STEP
+  // (which changes points.length) forces a refetch instead of returning
+  // a stale payload from an earlier deploy.
+  const key='hix-g'+points.length+'-'+new Date().toISOString().slice(0,10);
   try{
     const cached=localStorage.getItem(key);
-    if(cached) return JSON.parse(cached);
+    if(cached){
+      const data=JSON.parse(cached);
+      if(Array.isArray(data) && data.length===points.length) return data;
+      // grid drifted since cache was written — drop and refetch
+      localStorage.removeItem(key);
+    }
   }catch(e){}
 
   const CHUNK=100, results=[];

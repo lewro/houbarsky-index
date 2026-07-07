@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Houbařský index — kde teď rostou houby</title>
+<meta name="description" content="Mapa podmínek pro růst hub v Česku. Počítáno ze srážek, půdní vlhkosti a teplot — ne z pověr.">
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --humus:#171a12;        /* forest-floor background */
+    --panel:#20241a;
+    --panel-edge:#33382a;
+    --moss:#8fae57;
+    --cap:#e0a83c;          /* chanterelle amber — the "it's good" colour */
+    --ink:#e8e6da;
+    --ink-dim:#a9a795;
+    --ink-faint:#6f6e5f;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:var(--humus);color:var(--ink);
+    font-family:'Instrument Sans',system-ui,sans-serif;overflow:hidden}
+  #map{position:absolute;inset:0}
+
+  /* ---------- floating panel ---------- */
+  .panel{
+    position:absolute;top:14px;left:14px;z-index:10;
+    background:color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter:blur(8px);
+    border:1px solid var(--panel-edge);border-radius:14px;
+    padding:16px 18px 14px;max-width:330px;
+    box-shadow:0 8px 30px rgba(0,0,0,.45);
+  }
+  h1{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;
+    font-size:1.45rem;line-height:1.05;letter-spacing:-.01em}
+  h1 .cap{color:var(--cap)}
+  .sub{font-size:.78rem;color:var(--ink-dim);margin-top:5px;line-height:1.45}
+
+  .days{display:flex;gap:5px;margin-top:13px;flex-wrap:wrap}
+  .day{
+    font:600 .78rem 'Instrument Sans',sans-serif;color:var(--ink-dim);
+    background:transparent;border:1px solid var(--panel-edge);
+    border-radius:9px;padding:6px 10px;cursor:pointer;
+    transition:all .15s ease;
+  }
+  .day:hover{border-color:var(--moss);color:var(--ink)}
+  .day.on{background:var(--moss);border-color:var(--moss);color:#171a12}
+  .day.wknd:not(.on){border-color:#4d5638;color:var(--moss)}
+  .day small{display:block;font-weight:400;font-size:.62rem;opacity:.75}
+
+  .status{margin-top:11px;font-size:.74rem;color:var(--ink-faint)}
+  .status.err{color:#d98a6a}
+
+  /* ---------- legend ---------- */
+  .legend{
+    position:absolute;left:14px;bottom:22px;z-index:10;
+    background:color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter:blur(8px);
+    border:1px solid var(--panel-edge);border-radius:12px;
+    padding:11px 14px;font-size:.72rem;
+  }
+  .legend .row{display:flex;align-items:center;gap:8px;margin:3px 0}
+  .legend .sw{width:15px;height:15px;border-radius:4px;flex:none}
+  .legend .lbl{color:var(--ink-dim)}
+  .legend .lbl b{color:var(--ink);font-weight:600}
+
+  /* ---------- popup ---------- */
+  .maplibregl-popup-content{
+    background:var(--panel);color:var(--ink);border:1px solid var(--panel-edge);
+    border-radius:12px;padding:14px 16px;font-family:'Instrument Sans',sans-serif;
+    box-shadow:0 10px 34px rgba(0,0,0,.5);min-width:225px;
+  }
+  .maplibregl-popup-tip{border-top-color:var(--panel)!important;border-bottom-color:var(--panel)!important}
+  .maplibregl-popup-close-button{color:var(--ink-dim);font-size:18px;right:6px;top:4px}
+  .pp-score{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:2rem;line-height:1}
+  .pp-verdict{font-weight:600;font-size:.85rem;margin:2px 0 9px}
+  .pp-row{display:flex;justify-content:space-between;gap:14px;font-size:.76rem;
+    color:var(--ink-dim);padding:3px 0;border-top:1px solid var(--panel-edge)}
+  .pp-row b{color:var(--ink);font-weight:600;white-space:nowrap}
+
+  @media (max-width:560px){
+    .panel{max-width:calc(100vw - 28px)}
+    .legend{bottom:14px;font-size:.68rem}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .day{transition:none}
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="panel">
+  <h1>Houbařský<br>index<span class="cap"> 🍄</span></h1>
+  <div class="sub">Kde v Česku teď rostou houby — počítáno ze srážek posledních 14&nbsp;dní, půdní vlhkosti a teplot. Ne z pověr.</div>
+  <div class="days" id="days"></div>
+  <div class="status" id="status">Načítám data z Open-Meteo…</div>
+</div>
+
+<div class="legend">
+  <div class="row"><span class="sw" style="background:#4f4a3c"></span><span class="lbl"><b>0–25</b> Sucho, zůstaň doma</span></div>
+  <div class="row"><span class="sw" style="background:#5f6b3d"></span><span class="lbl"><b>25–50</b> Slabé, spíš procházka</span></div>
+  <div class="row"><span class="sw" style="background:#7d9b49"></span><span class="lbl"><b>50–70</b> Slušné podmínky</span></div>
+  <div class="row"><span class="sw" style="background:#a8b944"></span><span class="lbl"><b>70–85</b> Roste!</span></div>
+  <div class="row"><span class="sw" style="background:#e0a83c"></span><span class="lbl"><b>85+</b> Hřibobraní 🧺</span></div>
+</div>
+
+<script>
+/* ================= grid over ČR ================= */
+// simplified ČR border (lon,lat) for point-in-polygon filtering
+const CZ = [[12.09,50.25],[12.55,50.40],[13.00,50.50],[13.55,50.72],[14.30,50.88],
+[14.30,51.05],[15.00,51.00],[15.28,50.85],[16.00,50.62],[16.20,50.66],[16.45,50.60],
+[16.90,50.44],[17.40,50.27],[17.70,50.32],[18.00,50.05],[18.60,49.90],[18.85,49.52],
+[18.40,49.40],[18.15,49.10],[17.65,48.85],[17.20,48.87],[16.95,48.62],[16.60,48.78],
+[16.10,48.75],[15.00,48.98],[14.70,48.58],[14.05,48.55],[13.50,48.77],[13.00,49.30],
+[12.40,49.75],[12.09,50.25]];
+
+function inCZ(lon,lat){
+  let inside=false;
+  for(let i=0,j=CZ.length-1;i<CZ.length;j=i++){
+    const [xi,yi]=CZ[i],[xj,yj]=CZ[j];
+    if(((yi>lat)!==(yj>lat)) && (lon < (xj-xi)*(lat-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+
+// honeycomb grid: pointy-top hexes tile at dx = lonStep, dy = latStep, odd rows shifted dx/2
+const LON_STEP=0.42, LAT_STEP=0.27;
+const R_LON=LON_STEP/Math.sqrt(3)*1.02, R_LAT=LAT_STEP/1.5*1.02; // hex radii (deg), tiny overlap
+const points=[];
+{
+  let row=0;
+  for(let lat=48.55; lat<=51.06; lat+=LAT_STEP, row++){
+    const off=(row%2)?LON_STEP/2:0;
+    for(let lon=12.05+off; lon<=18.9; lon+=LON_STEP){
+      if(inCZ(lon,lat)) points.push({lon:+lon.toFixed(3),lat:+lat.toFixed(3)});
+    }
+  }
+}
+
+function hexCoords(p){
+  const c=[];
+  for(let k=0;k<6;k++){
+    const a=Math.PI/6+k*Math.PI/3;
+    c.push([p.lon+R_LON*Math.cos(a), p.lat+R_LAT*Math.sin(a)]);
+  }
+  c.push(c[0]);
+  return [c];
+}
+
+/* ================= Open-Meteo fetch ================= */
+const PAST=14, FUT=7;
+const statusEl=document.getElementById('status');
+
+async function fetchAll(){
+  const key='hix-'+new Date().toISOString().slice(0,10);
+  try{
+    const cached=localStorage.getItem(key);
+    if(cached) return JSON.parse(cached);
+  }catch(e){}
+
+  const CHUNK=20, results=[];
+  for(let i=0;i<points.length;i+=CHUNK){
+    const chunk=points.slice(i,i+CHUNK);
+    statusEl.textContent=`Načítám data z Open-Meteo… ${Math.min(i+CHUNK,points.length)}/${points.length} bodů`;
+    const url='https://api.open-meteo.com/v1/forecast'
+      +'?latitude='+chunk.map(p=>p.lat).join(',')
+      +'&longitude='+chunk.map(p=>p.lon).join(',')
+      +'&daily=precipitation_sum,temperature_2m_max,temperature_2m_min'
+      +'&hourly=soil_moisture_0_to_7cm'
+      +`&past_days=${PAST}&forecast_days=${FUT}&timezone=Europe%2FPrague`;
+    const r=await fetch(url);
+    if(!r.ok) throw new Error('Open-Meteo '+r.status);
+    const j=await r.json();
+    results.push(...(Array.isArray(j)?j:[j]));
+    await new Promise(res=>setTimeout(res,150)); // be polite
+  }
+  // compact: keep daily arrays + daily-mean soil moisture
+  const compact=results.map(loc=>{
+    const sm=loc.hourly.soil_moisture_0_to_7cm||[];
+    const days=loc.daily.time.length, smDaily=[];
+    for(let d=0;d<days;d++){
+      let s=0,n=0;
+      for(let h=d*24;h<(d+1)*24 && h<sm.length;h++){ if(sm[h]!=null){s+=sm[h];n++;} }
+      smDaily.push(n?s/n:null);
+    }
+    return {time:loc.daily.time, prcp:loc.daily.precipitation_sum,
+            tmax:loc.daily.temperature_2m_max, tmin:loc.daily.temperature_2m_min,
+            soil:smDaily};
+  });
+  try{
+    // drop yesterday's cache
+    Object.keys(localStorage).filter(k=>k.startsWith('hix-')&&k!==key)
+      .forEach(k=>localStorage.removeItem(k));
+    localStorage.setItem(key,JSON.stringify(compact));
+  }catch(e){}
+  return compact;
+}
+
+/* ================= scoring ================= */
+// lag weight: fruiting follows rain by ~5–10 days
+function lagW(lag){
+  if(lag<0) return 0;
+  if(lag<=2) return .25;
+  if(lag<=4) return .65;
+  if(lag<=10) return 1.0;
+  if(lag<=14) return .45;
+  return 0;
+}
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+
+// score for one location on day index D (0..PAST+FUT-1); "today" = PAST
+function score(loc, D){
+  // 1) rain trigger — weighted rain over the 14 days before D (forecast rain counts for future D)
+  let rain=0;
+  for(let d=Math.max(0,D-14); d<=D; d++){
+    const p=loc.prcp[d]; if(p!=null) rain+=p*lagW(D-d);
+  }
+  const rainS=clamp(Math.sqrt(rain/32),0,1); // ~32mm weighted ≈ saturated
+
+  // 2) soil moisture around D (0–7 cm, m³/m³)
+  let sm=0,n=0;
+  for(let d=Math.max(0,D-1); d<=Math.min(loc.soil.length-1,D); d++){
+    if(loc.soil[d]!=null){sm+=loc.soil[d];n++;}
+  }
+  sm=n?sm/n:0.18;
+  const soilS=clamp((sm-0.13)/(0.30-0.13),0,1);
+
+  // 3) temperature D-2..D — sweet spot 11–19 °C mean
+  let tm=0,tn=0,frost=false,heat=false;
+  for(let d=Math.max(0,D-2); d<=D; d++){
+    if(loc.tmax[d]!=null&&loc.tmin[d]!=null){
+      tm+=(loc.tmax[d]+loc.tmin[d])/2; tn++;
+      if(loc.tmin[d]<0.5) frost=true;
+      if(loc.tmax[d]>29) heat=true;
+    }
+  }
+  tm=tn?tm/tn:14;
+  let tempS;
+  if(tm>=11&&tm<=19) tempS=1;
+  else if(tm<11) tempS=clamp((tm-3)/8,0,1);
+  else tempS=clamp((27-tm)/8,0,1);
+
+  let s=100*(0.45*rainS+0.35*soilS+0.20*tempS);
+  if(frost) s*=0.5;
+  if(heat)  s*=0.8;
+  // dry snap: nothing fell in last 3 days and it's hot → surface dries out
+  let dry3=0;
+  for(let d=Math.max(0,D-2);d<=D;d++) dry3+=loc.prcp[d]||0;
+  if(dry3<0.5 && tm>22) s*=0.85;
+
+  return {s:Math.round(clamp(s,0,100)), rain:Math.round(rain), sm, tm:Math.round(tm*10)/10};
+}
+
+function verdict(s){
+  if(s>=85) return 'Hřibobraní — ber košík 🧺';
+  if(s>=70) return 'Roste! Stojí to za výpravu';
+  if(s>=50) return 'Slušné, něco najdeš';
+  if(s>=25) return 'Slabé — spíš na procházku';
+  return 'Sucho, zůstaň doma';
+}
+
+// colour ramp: humus → moss → chanterelle amber
+const RAMP=[[0,'#4f4a3c'],[25,'#5f6b3d'],[50,'#7d9b49'],[70,'#a8b944'],[85,'#e0a83c'],[100,'#f0be55']];
+function colour(s){
+  for(let i=1;i<RAMP.length;i++){
+    if(s<=RAMP[i][0]){
+      const [a,ca]=RAMP[i-1],[b,cb]=RAMP[i],t=(s-a)/(b-a);
+      const h=c=>parseInt(c,16);
+      const mix=(x,y)=>Math.round(h(x)+(h(y)-h(x))*t).toString(16).padStart(2,'0');
+      return '#'+mix(ca.slice(1,3),cb.slice(1,3))+mix(ca.slice(3,5),cb.slice(3,5))+mix(ca.slice(5,7),cb.slice(5,7));
+    }
+  }
+  return RAMP.at(-1)[1];
+}
+
+/* ================= map + UI ================= */
+const map=new maplibregl.Map({
+  container:'map',
+  style:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  center:[15.47,49.82], zoom:6.6, minZoom:5.5, maxZoom:10,
+  attributionControl:{compact:true}
+});
+map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-right');
+
+let DATA=null, dayOffset=0; // 0 = today
+
+function buildGeoJSON(){
+  const feats=points.map((p,i)=>{
+    const loc=DATA[i];
+    const D=PAST+dayOffset;
+    const r=score(loc,D);
+    return {type:'Feature',
+      geometry:{type:'Polygon',coordinates:hexCoords(p)},
+      properties:{score:r.s,color:colour(r.s),rain:r.rain,sm:+(r.sm*100).toFixed(0),tm:r.tm}};
+  });
+  return {type:'FeatureCollection',features:feats};
+}
+
+function refresh(){
+  const gj=buildGeoJSON();
+  const src=map.getSource('hex');
+  if(src) src.setData(gj);
+  else{
+    map.addSource('hex',{type:'geojson',data:gj});
+    map.addLayer({id:'hex-fill',type:'fill',source:'hex',
+      paint:{'fill-color':['get','color'],'fill-opacity':0.55}});
+    map.addLayer({id:'hex-line',type:'line',source:'hex',
+      paint:{'line-color':'#171a12','line-width':0.8,'line-opacity':0.6}});
+    map.on('click','hex-fill',e=>{
+      const f=e.features[0].properties;
+      new maplibregl.Popup({closeButton:true,maxWidth:'280px'})
+        .setLngLat(e.lngLat)
+        .setHTML(`<div class="pp-score" style="color:${colour(f.score)}">${f.score}</div>
+          <div class="pp-verdict">${verdict(f.score)}</div>
+          <div class="pp-row"><span>Srážkový impuls (14 d, vážený)</span><b>${f.rain} mm</b></div>
+          <div class="pp-row"><span>Půdní vlhkost 0–7 cm</span><b>${f.sm} %</b></div>
+          <div class="pp-row"><span>Průměrná teplota</span><b>${f.tm} °C</b></div>`)
+        .addTo(map);
+    });
+    map.on('mouseenter','hex-fill',()=>map.getCanvas().style.cursor='pointer');
+    map.on('mouseleave','hex-fill',()=>map.getCanvas().style.cursor='');
+  }
+}
+
+function buildDayChips(){
+  const el=document.getElementById('days');
+  const names=['Ne','Po','Út','St','Čt','Pá','So'];
+  const today=new Date();
+  el.innerHTML='';
+  for(let d=0;d<FUT;d++){
+    const dt=new Date(today); dt.setDate(dt.getDate()+d);
+    const dow=dt.getDay(), wknd=(dow===0||dow===6);
+    const b=document.createElement('button');
+    b.className='day'+(d===dayOffset?' on':'')+(wknd?' wknd':'');
+    b.innerHTML=(d===0?'Dnes':d===1?'Zítra':names[dow])
+      +`<small>${dt.getDate()}.${dt.getMonth()+1}.</small>`;
+    b.onclick=()=>{dayOffset=d;buildDayChips();refresh();};
+    el.appendChild(b);
+  }
+}
+
+(async()=>{
+  buildDayChips();
+  try{
+    DATA=await fetchAll();
+    statusEl.textContent=`${points.length} bodů · data Open-Meteo · aktualizováno ${new Date().toLocaleTimeString('cs-CZ',{hour:'2-digit',minute:'2-digit'})}`;
+    if(map.loaded()) refresh(); else map.on('load',refresh);
+  }catch(err){
+    statusEl.className='status err';
+    statusEl.textContent='Nepodařilo se načíst data: '+err.message+' — zkus obnovit stránku.';
+  }
+})();
+</script>
+</body>
+</html>

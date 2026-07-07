@@ -4,11 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Houbařský index — kde teď rostou houby</title>
-<meta name="description" content="Mapa podmínek pro růst hub v Česku. Počítáno ze srážek, půdní vlhkosti a teplot — ne z pověr.">
+<meta name="description" content="Mapa podmínek pro růst hub v Česku. Počítáno ze srážek, půdní vlhkosti a teplot.">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Houby">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
     --humus:#171a12;        /* forest-floor background */
@@ -33,9 +40,9 @@
     padding:16px 18px 14px;width:360px;max-width:calc(100vw - 28px);
     box-shadow:0 8px 30px rgba(0,0,0,.45);
   }
-  h1{font-family:'Bricolage Grotesque',sans-serif;font-weight:400;
+  h1{font-family:'Bricolage Grotesque',sans-serif;font-weight:300;
     font-size:1.45rem;line-height:1.05;letter-spacing:-.01em;color:#fff}
-  .sub{font-size:.78rem;color:#fff;margin-top:5px;line-height:1.45}
+  .sub{font-size:.78rem;color:#a9a9a9;margin-top:5px;line-height:1.45}
 
   .days{display:flex;gap:4px;margin-top:13px;flex-wrap:nowrap}
   .day{
@@ -88,12 +95,49 @@
     color:rgba(255,255,255,.6);padding:3px 0;border-top:1px solid #333}
   .pp-row b{color:#fff;font-weight:600;white-space:nowrap}
 
+  /* ---------- custom map controls (centre + search) ---------- */
+  .ctrl-btn{
+    background:#000;color:#fff;border:none;
+    width:29px;height:29px;padding:0;
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;
+  }
+  .ctrl-btn:hover{background:#222}
+  .ctrl-btn:focus-visible{outline:1px solid #fff;outline-offset:-2px}
+  .maplibregl-ctrl-group.hix-ctrl{background:#000;border:1px solid #000;box-shadow:0 4px 14px rgba(0,0,0,.45)}
+  .maplibregl-ctrl-group.hix-ctrl button+button{border-top:1px solid #333}
+
+  /* search overlay dropped from the top */
+  .search-overlay{
+    position:absolute;top:14px;left:50%;transform:translateX(-50%) translateY(-8px);
+    background:#000;color:#fff;border:1px solid #333;border-radius:14px;
+    padding:10px;width:min(360px,calc(100vw - 28px));z-index:9;
+    opacity:0;pointer-events:none;transition:opacity .15s ease, transform .15s ease;
+    display:flex;flex-direction:column;gap:6px;
+    box-shadow:0 8px 30px rgba(0,0,0,.45);
+  }
+  .search-overlay.open{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0)}
+  .search-overlay input{
+    background:#111;color:#fff;border:1px solid #333;border-radius:8px;
+    padding:9px 11px;font:500 .82rem 'Instrument Sans',sans-serif;outline:none;
+  }
+  .search-overlay input:focus{border-color:#666}
+  .search-item{
+    display:block;width:100%;text-align:left;background:transparent;color:#fff;
+    border:none;padding:7px 9px;border-radius:6px;cursor:pointer;
+    font:400 .75rem 'Instrument Sans',sans-serif;line-height:1.35;
+  }
+  .search-item:hover,.search-item:focus-visible{background:#222;outline:none}
+  #searchResults:not(:empty){margin-top:2px}
+
   @media (max-width:560px){
     .panel{width:calc(100vw - 28px);padding:14px 14px 12px}
     .days{gap:3px}
     .day{padding:5px 2px;font-size:.66rem}
     .day small{font-size:.54rem}
     .legend{font-size:.68rem}
+    .search-overlay{top:auto;bottom:14px;transform:translateX(-50%) translateY(8px)}
+    .search-overlay.open{transform:translateX(-50%) translateY(0)}
   }
   @media (prefers-reduced-motion: reduce){
     .day{transition:none}
@@ -105,18 +149,18 @@
 
 <div class="panel">
   <h1>Houbařský<br>index</h1>
-  <div class="sub">Kde v Česku teď rostou houby — počítáno ze srážek posledních 14&nbsp;dní, půdní vlhkosti a teplot. Ne z pověr.</div>
+  <div class="sub">Kde v Česku teď rostou houby — počítáno ze srážek posledních 14&nbsp;dní, půdní vlhkosti a teplot.</div>
   <div class="days" id="days"></div>
   <div class="status" id="status">Načítám data z Open-Meteo…</div>
   <div class="legend-toggle" id="legendToggle" role="button" tabindex="0" aria-expanded="false" aria-controls="legend">
     <span>Legenda</span><span class="chev">▾</span>
   </div>
   <div class="legend" id="legend">
-    <div class="row"><span class="sw" style="background:#c0392b"></span><span class="lbl"><b>0–25</b> Sucho, zůstaň doma</span></div>
-    <div class="row"><span class="sw" style="background:#e67e22"></span><span class="lbl"><b>25–50</b> Slabé, spíš procházka</span></div>
-    <div class="row"><span class="sw" style="background:#f1c40f"></span><span class="lbl"><b>50–70</b> Slušné podmínky</span></div>
-    <div class="row"><span class="sw" style="background:#8bc34a"></span><span class="lbl"><b>70–85</b> Roste!</span></div>
-    <div class="row"><span class="sw" style="background:#27ae60"></span><span class="lbl"><b>85+</b> Hřibobraní 🧺</span></div>
+    <div class="row"><span class="sw" style="background:#7f1d1d"></span><span class="lbl"><b>0–25</b> Sucho, zůstaň doma</span></div>
+    <div class="row"><span class="sw" style="background:#ea580c"></span><span class="lbl"><b>25–50</b> Slabé, spíš procházka</span></div>
+    <div class="row"><span class="sw" style="background:#facc15"></span><span class="lbl"><b>50–70</b> Slušné podmínky</span></div>
+    <div class="row"><span class="sw" style="background:#a3e635"></span><span class="lbl"><b>70–85</b> Roste!</span></div>
+    <div class="row"><span class="sw" style="background:#16a34a"></span><span class="lbl"><b>85+</b> Hřibobraní 🧺</span></div>
   </div>
 </div>
 
@@ -283,8 +327,9 @@ function verdict(s){
   return 'Sucho, zůstaň doma';
 }
 
-// colour ramp: red (dry) → orange → yellow → green-yellow → green (mushroom weather)
-const RAMP=[[0,'#c0392b'],[25,'#e67e22'],[50,'#f1c40f'],[70,'#8bc34a'],[85,'#27ae60'],[100,'#1e8449']];
+// colour ramp: red (dry) → orange → yellow → chartreuse → green → deep green
+// tuned for high step-to-step contrast so the map reads at a glance
+const RAMP=[[0,'#7f1d1d'],[25,'#ea580c'],[50,'#facc15'],[70,'#a3e635'],[85,'#16a34a'],[100,'#052e16']];
 function colour(s){
   for(let i=1;i<RAMP.length;i++){
     if(s<=RAMP[i][0]){
@@ -305,6 +350,83 @@ const map=new maplibregl.Map({
   attributionControl:{compact:true}
 });
 map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-right');
+
+/* ---------- centre-map + search custom controls ---------- */
+const CZ_CENTER=[15.47,49.82], CZ_ZOOM=6.6;
+
+class HixControl{
+  constructor(opts){this._opts=opts}
+  onAdd(map){
+    this._map=map;
+    const c=this._container=document.createElement('div');
+    c.className='maplibregl-ctrl maplibregl-ctrl-group hix-ctrl';
+    const b=document.createElement('button');
+    b.type='button';
+    b.className='ctrl-btn';
+    b.title=this._opts.title;
+    b.setAttribute('aria-label',this._opts.title);
+    b.innerHTML=this._opts.icon;
+    b.onclick=e=>{e.preventDefault();this._opts.onClick(map,b);};
+    c.appendChild(b);
+    return c;
+  }
+  onRemove(){this._container.remove();this._map=null;}
+}
+
+const ICON_CENTRE='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>';
+const ICON_SEARCH='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+
+map.addControl(new HixControl({title:'Vycentrovat mapu',icon:ICON_CENTRE,onClick:(m)=>m.flyTo({center:CZ_CENTER,zoom:CZ_ZOOM,essential:true})}),'top-right');
+
+/* search: dropdown overlay with debounced Nominatim geocoding */
+const searchOverlay=document.createElement('div');
+searchOverlay.className='search-overlay';
+searchOverlay.innerHTML='<input type="search" id="searchInput" placeholder="Hledat obec, město…" autocomplete="off" spellcheck="false" enterkeyhint="search"><div id="searchResults"></div>';
+document.body.appendChild(searchOverlay);
+const searchInput=searchOverlay.querySelector('#searchInput');
+const searchResults=searchOverlay.querySelector('#searchResults');
+let searchAbort=null,searchDeb=null;
+async function doSearch(){
+  const q=searchInput.value.trim();
+  if(searchAbort)searchAbort.abort();
+  if(q.length<2){searchResults.innerHTML='';return;}
+  searchAbort=new AbortController();
+  try{
+    const url='https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=cz&q='+encodeURIComponent(q);
+    const r=await fetch(url,{signal:searchAbort.signal,headers:{'Accept-Language':'cs'}});
+    if(!r.ok)return;
+    const items=await r.json();
+    searchResults.innerHTML=items.map(it=>{
+      const label=(it.display_name||'').replace(/</g,'&lt;');
+      return `<button type="button" class="search-item" data-lat="${it.lat}" data-lon="${it.lon}">${label}</button>`;
+    }).join('');
+    searchResults.querySelectorAll('.search-item').forEach(el=>{
+      el.onclick=()=>{
+        map.flyTo({center:[+el.dataset.lon,+el.dataset.lat],zoom:9.5,essential:true});
+        closeSearch();
+      };
+    });
+  }catch(e){if(e.name!=='AbortError')/* silent */; }
+}
+function openSearch(){searchOverlay.classList.add('open');setTimeout(()=>searchInput.focus(),0);}
+function closeSearch(){searchOverlay.classList.remove('open');searchInput.blur();}
+searchInput.addEventListener('input',()=>{clearTimeout(searchDeb);searchDeb=setTimeout(doSearch,250);});
+searchInput.addEventListener('keydown',e=>{
+  if(e.key==='Escape')closeSearch();
+  else if(e.key==='Enter'){e.preventDefault();doSearch();}
+});
+document.addEventListener('click',e=>{
+  if(!searchOverlay.classList.contains('open'))return;
+  if(searchOverlay.contains(e.target))return;
+  // ignore clicks on the search control button itself (it toggles)
+  if(e.target.closest('button')?.getAttribute('aria-label')==='Hledat')return;
+  closeSearch();
+});
+
+map.addControl(new HixControl({title:'Hledat',icon:ICON_SEARCH,onClick:()=>{
+  if(searchOverlay.classList.contains('open'))closeSearch();
+  else openSearch();
+}}),'top-right');
 
 let DATA=null, dayOffset=0; // 0 = today
 
@@ -327,7 +449,7 @@ function refresh(){
   else{
     map.addSource('hex',{type:'geojson',data:gj});
     map.addLayer({id:'hex-fill',type:'fill',source:'hex',
-      paint:{'fill-color':['get','color'],'fill-opacity':0.55}});
+      paint:{'fill-color':['get','color'],'fill-opacity':0.78}});
     map.addLayer({id:'hex-line',type:'line',source:'hex',
       paint:{'line-color':'#171a12','line-width':0.8,'line-opacity':0.6}});
     map.on('click','hex-fill',e=>{

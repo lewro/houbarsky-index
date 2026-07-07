@@ -75,17 +75,18 @@
 
   /* ---------- popup ---------- */
   .maplibregl-popup-content{
-    background:var(--panel);color:var(--ink);border:1px solid var(--panel-edge);
+    background:#000;color:#fff;border:1px solid #333;
     border-radius:12px;padding:14px 16px;font-family:'Instrument Sans',sans-serif;
     box-shadow:0 10px 34px rgba(0,0,0,.5);min-width:225px;
   }
-  .maplibregl-popup-tip{border-top-color:var(--panel)!important;border-bottom-color:var(--panel)!important}
-  .maplibregl-popup-close-button{color:var(--ink-dim);font-size:18px;right:6px;top:4px}
+  .maplibregl-popup-tip{border-top-color:#000!important;border-bottom-color:#000!important}
+  .maplibregl-popup-close-button{color:#fff;opacity:.6;font-size:18px;right:6px;top:4px}
+  .maplibregl-popup-close-button:hover{opacity:1;background:transparent}
   .pp-score{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:2rem;line-height:1}
-  .pp-verdict{font-weight:600;font-size:.85rem;margin:2px 0 9px}
+  .pp-verdict{font-weight:600;font-size:.85rem;margin:2px 0 9px;color:#fff}
   .pp-row{display:flex;justify-content:space-between;gap:14px;font-size:.76rem;
-    color:var(--ink-dim);padding:3px 0;border-top:1px solid var(--panel-edge)}
-  .pp-row b{color:var(--ink);font-weight:600;white-space:nowrap}
+    color:rgba(255,255,255,.6);padding:3px 0;border-top:1px solid #333}
+  .pp-row b{color:#fff;font-weight:600;white-space:nowrap}
 
   @media (max-width:560px){
     .panel{width:calc(100vw - 28px);padding:14px 14px 12px}
@@ -139,7 +140,7 @@ function inCZ(lon,lat){
 }
 
 // honeycomb grid: pointy-top hexes tile at dx = lonStep, dy = latStep, odd rows shifted dx/2
-const LON_STEP=0.42, LAT_STEP=0.27;
+const LON_STEP=0.21, LAT_STEP=0.135;
 const R_LON=LON_STEP/Math.sqrt(3)*1.02, R_LAT=LAT_STEP/1.5*1.02; // hex radii (deg), tiny overlap
 const points=[];
 {
@@ -173,7 +174,7 @@ async function fetchAll(){
     if(cached) return JSON.parse(cached);
   }catch(e){}
 
-  const CHUNK=20, results=[];
+  const CHUNK=100, results=[];
   for(let i=0;i<points.length;i+=CHUNK){
     const chunk=points.slice(i,i+CHUNK);
     statusEl.textContent=`Načítám data z Open-Meteo… ${Math.min(i+CHUNK,points.length)}/${points.length} bodů`;

@@ -163,7 +163,7 @@
   <h1>Houbařský<br>index</h1>
   <div class="sub">Kde v Česku teď rostou houby — počítáno ze srážek posledních 14&nbsp;dní, půdní vlhkosti a teplot.</div>
   <div class="days" id="days"></div>
-  <div class="status" id="status">Načítám data z Open-Meteo…</div>
+  <div class="status" id="status">Načítám data…</div>
   <div class="legend-toggle" id="legendToggle" role="button" tabindex="0" aria-expanded="false" aria-controls="legend">
     <span>Legenda</span><span class="chev">▾</span>
   </div>
@@ -178,38 +178,14 @@
 
 <script>
 /* ================= grid over ČR ================= */
-// simplified ČR border (lon,lat) for point-in-polygon filtering
-const CZ = [[12.09,50.25],[12.55,50.40],[13.00,50.50],[13.55,50.72],[14.30,50.88],
-[14.30,51.05],[15.00,51.00],[15.28,50.85],[16.00,50.62],[16.20,50.66],[16.45,50.60],
-[16.90,50.44],[17.40,50.27],[17.70,50.32],[18.00,50.05],[18.60,49.90],[18.85,49.52],
-[18.40,49.40],[18.15,49.10],[17.65,48.85],[17.20,48.87],[16.95,48.62],[16.60,48.78],
-[16.10,48.75],[15.00,48.98],[14.70,48.58],[14.05,48.55],[13.50,48.77],[13.00,49.30],
-[12.40,49.75],[12.09,50.25]];
-
-function inCZ(lon,lat){
-  let inside=false;
-  for(let i=0,j=CZ.length-1;i<CZ.length;j=i++){
-    const [xi,yi]=CZ[i],[xj,yj]=CZ[j];
-    if(((yi>lat)!==(yj>lat)) && (lon < (xj-xi)*(lat-yi)/(yj-yi)+xi)) inside=!inside;
-  }
-  return inside;
-}
-
-// honeycomb grid: pointy-top hexes tile at dx = lonStep, dy = latStep, odd rows shifted dx/2
-// ~7.5 km cells — floor set by Open-Meteo's underlying ICON-EU model (~7 km).
-// Below this we'd just be interpolating the same forecast points (false precision).
-const LON_STEP=0.105, LAT_STEP=0.0675;
-const R_LON=LON_STEP/Math.sqrt(3)*1.02, R_LAT=LAT_STEP/1.5*1.02; // hex radii (deg), tiny overlap
-const points=[];
-{
-  let row=0;
-  for(let lat=48.55; lat<=51.06; lat+=LAT_STEP, row++){
-    const off=(row%2)?LON_STEP/2:0;
-    for(let lon=12.05+off; lon<=18.9; lon+=LON_STEP){
-      if(inCZ(lon,lat)) points.push({lon:+lon.toFixed(3),lat:+lat.toFixed(3)});
-    }
-  }
-}
+// The honeycomb grid and all Open-Meteo data are precomputed daily by
+// scripts/build_data.py (GitHub Actions cron) and shipped as a static data.json.
+// The page makes ZERO live API calls — this avoids Open-Meteo's ~600-calls/min
+// limit that a dense client-side grid was tripping (blank map in production).
+// `points` (lon/lat per hex) and the hex radii are populated from data.json.
+let LON_STEP=0.105, LAT_STEP=0.0675;              // defaults; overwritten from data.json
+let R_LON=LON_STEP/Math.sqrt(3)*1.02, R_LAT=LAT_STEP/1.5*1.02; // hex radii (deg), tiny overlap
+let points=[];
 
 function hexCoords(p){
   const c=[];
@@ -221,61 +197,25 @@ function hexCoords(p){
   return [c];
 }
 
-/* ================= Open-Meteo fetch ================= */
-const PAST=14, FUT=7;
+/* ================= data load ================= */
+// PAST/FUT come from data.json (index PAST == "today"); keep defaults as fallback.
+let PAST=14, FUT=7;
 const statusEl=document.getElementById('status');
 
+// Read the precomputed static payload. Populates `points`, grid steps and radii,
+// and returns the per-point compact arrays index-aligned to `points`.
 async function fetchAll(){
-  // Cache key includes a grid signature so a change to LON_STEP/LAT_STEP
-  // (which changes points.length) forces a refetch instead of returning
-  // a stale payload from an earlier deploy.
-  const key='hix-g'+points.length+'-'+new Date().toISOString().slice(0,10);
-  try{
-    const cached=localStorage.getItem(key);
-    if(cached){
-      const data=JSON.parse(cached);
-      if(Array.isArray(data) && data.length===points.length) return data;
-      // grid drifted since cache was written — drop and refetch
-      localStorage.removeItem(key);
-    }
-  }catch(e){}
-
-  const CHUNK=100, results=[];
-  for(let i=0;i<points.length;i+=CHUNK){
-    const chunk=points.slice(i,i+CHUNK);
-    statusEl.textContent=`Načítám data z Open-Meteo… ${Math.min(i+CHUNK,points.length)}/${points.length} bodů`;
-    const url='https://api.open-meteo.com/v1/forecast'
-      +'?latitude='+chunk.map(p=>p.lat).join(',')
-      +'&longitude='+chunk.map(p=>p.lon).join(',')
-      +'&daily=precipitation_sum,temperature_2m_max,temperature_2m_min'
-      +'&hourly=soil_moisture_0_to_7cm'
-      +`&past_days=${PAST}&forecast_days=${FUT}&timezone=Europe%2FPrague`;
-    const r=await fetch(url);
-    if(!r.ok) throw new Error('Open-Meteo '+r.status);
-    const j=await r.json();
-    results.push(...(Array.isArray(j)?j:[j]));
-    await new Promise(res=>setTimeout(res,150)); // be polite
-  }
-  // compact: keep daily arrays + daily-mean soil moisture
-  const compact=results.map(loc=>{
-    const sm=loc.hourly.soil_moisture_0_to_7cm||[];
-    const days=loc.daily.time.length, smDaily=[];
-    for(let d=0;d<days;d++){
-      let s=0,n=0;
-      for(let h=d*24;h<(d+1)*24 && h<sm.length;h++){ if(sm[h]!=null){s+=sm[h];n++;} }
-      smDaily.push(n?s/n:null);
-    }
-    return {time:loc.daily.time, prcp:loc.daily.precipitation_sum,
-            tmax:loc.daily.temperature_2m_max, tmin:loc.daily.temperature_2m_min,
-            soil:smDaily};
-  });
-  try{
-    // drop yesterday's cache
-    Object.keys(localStorage).filter(k=>k.startsWith('hix-')&&k!==key)
-      .forEach(k=>localStorage.removeItem(k));
-    localStorage.setItem(key,JSON.stringify(compact));
-  }catch(e){}
-  return compact;
+  const r=await fetch('data.json?v='+new Date().toISOString().slice(0,10),{cache:'no-cache'});
+  if(!r.ok) throw new Error('data.json '+r.status);
+  const doc=await r.json();
+  if(!doc||!Array.isArray(doc.points)||!doc.points.length) throw new Error('data.json prázdná nebo neplatná');
+  if(typeof doc.past==='number') PAST=doc.past;
+  if(typeof doc.fut==='number')  FUT=doc.fut;
+  if(doc.lon_step) LON_STEP=doc.lon_step;
+  if(doc.lat_step) LAT_STEP=doc.lat_step;
+  R_LON=LON_STEP/Math.sqrt(3)*1.02; R_LAT=LAT_STEP/1.5*1.02;
+  points=doc.points.map(p=>({lon:p.lon,lat:p.lat}));
+  return doc.points.map(p=>({prcp:p.prcp,tmax:p.tmax,tmin:p.tmin,soil:p.soil}));
 }
 
 /* ================= scoring ================= */
@@ -639,12 +579,13 @@ function initLegendToggle(){
 initLegendToggle();
 
 (async()=>{
-  buildDayChips();
   try{
     DATA=await fetchAll();
+    buildDayChips(); // after fetch so PAST/FUT from data.json are in effect
     statusEl.textContent=`${points.length} bodů · data Open-Meteo · aktualizováno ${new Date().toLocaleTimeString('cs-CZ',{hour:'2-digit',minute:'2-digit'})}`;
     if(map.loaded()) refresh(); else map.on('load',refresh);
   }catch(err){
+    buildDayChips();
     statusEl.className='status err';
     statusEl.textContent='Nepodařilo se načíst data: '+err.message+' — zkus obnovit stránku.';
   }

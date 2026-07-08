@@ -192,8 +192,9 @@
     }
     .side-panel.open{transform:translateY(0)}
     .side-panel .sp-scroll{padding:18px 18px 22px}
-    /* dim the header panel a bit when detail is open so the sheet reads as foreground */
-    body.detail-open .panel{opacity:.35;transition:opacity .2s ease}
+    /* on mobile the detail sheet takes 66vh, so the header panel has to get out of the way entirely */
+    .panel{transition:opacity .2s ease,transform .2s ease}
+    body.detail-open .panel{opacity:0;pointer-events:none;transform:translateY(-12px)}
   }
   @media (prefers-reduced-motion: reduce){
     .day{transition:none}

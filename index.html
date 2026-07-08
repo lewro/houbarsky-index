@@ -196,7 +196,9 @@ function inCZ(lon,lat){
 }
 
 // honeycomb grid: pointy-top hexes tile at dx = lonStep, dy = latStep, odd rows shifted dx/2
-const LON_STEP=0.21, LAT_STEP=0.135;
+// ~7.5 km cells — floor set by Open-Meteo's underlying ICON-EU model (~7 km).
+// Below this we'd just be interpolating the same forecast points (false precision).
+const LON_STEP=0.105, LAT_STEP=0.0675;
 const R_LON=LON_STEP/Math.sqrt(3)*1.02, R_LAT=LAT_STEP/1.5*1.02; // hex radii (deg), tiny overlap
 const points=[];
 {

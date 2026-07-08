@@ -95,7 +95,18 @@
     color:rgba(255,255,255,.6);padding:3px 0;border-top:1px solid #333}
   .pp-row b{color:#fff;font-weight:600;white-space:nowrap}
 
-  /* ---------- custom map controls (centre + search) ---------- */
+  /* ---------- user pin marker (geolocation + search) ---------- */
+  .user-pin{cursor:pointer;display:block;line-height:0;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))}
+
+  /* ---------- directions popup ---------- */
+  .dir-title{font-weight:600;font-size:.82rem;margin-bottom:9px;color:#fff}
+  .dir-btns{display:flex;gap:5px}
+  .dir-btn{flex:1;background:#111;color:#fff;padding:9px 6px;border:1px solid #333;
+    border-radius:8px;text-decoration:none;text-align:center;
+    font:500 .74rem 'Instrument Sans',sans-serif;transition:background .1s}
+  .dir-btn:hover{background:#222;border-color:#555}
+
+  /* ---------- custom map controls (locate + search) ---------- */
   .ctrl-btn{
     background:#000;color:#fff;border:none;
     width:29px;height:29px;padding:0;
@@ -136,7 +147,8 @@
     .day{padding:5px 2px;font-size:.66rem}
     .day small{font-size:.54rem}
     .legend{font-size:.68rem}
-    .search-overlay{top:auto;bottom:14px;transform:translateX(-50%) translateY(8px)}
+    /* on mobile the search dropdown lives above the bottom-right control stack */
+    .search-overlay{top:auto;bottom:150px;transform:translateX(-50%) translateY(8px)}
     .search-overlay.open{transform:translateX(-50%) translateY(0)}
   }
   @media (prefers-reduced-motion: reduce){
@@ -349,11 +361,9 @@ const map=new maplibregl.Map({
   center:[15.47,49.82], zoom:6.6, minZoom:5.5, maxZoom:10,
   attributionControl:{compact:true}
 });
-map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-right');
+map.addControl(new maplibregl.NavigationControl({showCompass:false}),'bottom-right');
 
-/* ---------- centre-map + search custom controls ---------- */
-const CZ_CENTER=[15.47,49.82], CZ_ZOOM=6.6;
-
+/* ---------- locate-me + search custom controls ---------- */
 class HixControl{
   constructor(opts){this._opts=opts}
   onAdd(map){
@@ -373,10 +383,44 @@ class HixControl{
   onRemove(){this._container.remove();this._map=null;}
 }
 
-const ICON_CENTRE='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>';
+const ICON_LOCATE='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>';
 const ICON_SEARCH='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
 
-map.addControl(new HixControl({title:'Vycentrovat mapu',icon:ICON_CENTRE,onClick:(m)=>m.flyTo({center:CZ_CENTER,zoom:CZ_ZOOM,essential:true})}),'top-right');
+/* one shared user pin (from geolocation or search); replaced when a new drop happens */
+let userPin=null;
+function makePinEl(){
+  const el=document.createElement('div');
+  el.className='user-pin';
+  el.innerHTML='<svg width="26" height="34" viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg" aria-label="Vybraný bod"><path d="M13 1C6.4 1 1 6.4 1 13c0 8.5 12 20 12 20s12-11.5 12-20c0-6.6-5.4-12-12-12z" fill="#ffffff" stroke="#000000" stroke-width="1.5"/><circle cx="13" cy="13" r="4" fill="#000000"/></svg>';
+  return el;
+}
+function dropUserPin(lon,lat){
+  if(userPin) userPin.remove();
+  const el=makePinEl();
+  el.addEventListener('click',ev=>{
+    ev.stopPropagation();
+    showDirectionsPopup([lon,lat]);
+  });
+  userPin=new maplibregl.Marker({element:el,anchor:'bottom'}).setLngLat([lon,lat]).addTo(map);
+}
+
+map.addControl(new HixControl({title:'Moje poloha',icon:ICON_LOCATE,onClick:(m,b)=>{
+  if(!navigator.geolocation){statusEl.textContent='Geolokace není v tomto prohlížeči podporována.';return;}
+  b.disabled=true;
+  navigator.geolocation.getCurrentPosition(
+    pos=>{
+      b.disabled=false;
+      const {longitude:lon,latitude:lat}=pos.coords;
+      m.flyTo({center:[lon,lat],zoom:m.getMaxZoom(),essential:true});
+      dropUserPin(lon,lat);
+    },
+    err=>{
+      b.disabled=false;
+      statusEl.textContent='Nepodařilo se získat polohu: '+(err.message||'zamítnuto').toLowerCase();
+    },
+    {enableHighAccuracy:true,timeout:10000,maximumAge:60000}
+  );
+}}),'bottom-right');
 
 /* search: dropdown overlay with debounced Nominatim geocoding */
 const searchOverlay=document.createElement('div');
@@ -402,7 +446,9 @@ async function doSearch(){
     }).join('');
     searchResults.querySelectorAll('.search-item').forEach(el=>{
       el.onclick=()=>{
-        map.flyTo({center:[+el.dataset.lon,+el.dataset.lat],zoom:9.5,essential:true});
+        const lon=+el.dataset.lon, lat=+el.dataset.lat;
+        map.flyTo({center:[lon,lat],zoom:map.getMaxZoom(),essential:true});
+        dropUserPin(lon,lat);
         closeSearch();
       };
     });
@@ -426,20 +472,92 @@ document.addEventListener('click',e=>{
 map.addControl(new HixControl({title:'Hledat',icon:ICON_SEARCH,onClick:()=>{
   if(searchOverlay.classList.contains('open'))closeSearch();
   else openSearch();
-}}),'top-right');
+}}),'bottom-right');
 
 let DATA=null, dayOffset=0; // 0 = today
+
+/* transient drill-in state (runtime only — never baked into cached fetchAll payload) */
+let selectedIdx=-1;
+let infoPopup=null;
+let dirPopup=null;
 
 function buildGeoJSON(){
   const feats=points.map((p,i)=>{
     const loc=DATA[i];
     const D=PAST+dayOffset;
     const r=score(loc,D);
-    return {type:'Feature',
+    return {type:'Feature', id:i,
       geometry:{type:'Polygon',coordinates:hexCoords(p)},
       properties:{score:r.s,color:colour(r.s),rain:r.rain,sm:+(r.sm*100).toFixed(0),tm:r.tm}};
   });
   return {type:'FeatureCollection',features:feats};
+}
+
+function hexBounds(p){
+  return [[p.lon-R_LON, p.lat-R_LAT], [p.lon+R_LON, p.lat+R_LAT]];
+}
+
+/* iOS detection for platform-native directions deeplink */
+const IS_IOS=/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+function directionsUrl(lat,lng,mode){
+  if(IS_IOS){
+    const dirflg=mode==='transit'?'r':mode==='walking'?'w':'d';
+    return `maps://?daddr=${lat},${lng}&dirflg=${dirflg}`;
+  }
+  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=${mode}`;
+}
+
+function showDirectionsPopup(lngLat){
+  if(dirPopup){dirPopup.remove();dirPopup=null;}
+  const lng=Array.isArray(lngLat)?lngLat[0]:lngLat.lng;
+  const lat=Array.isArray(lngLat)?lngLat[1]:lngLat.lat;
+  dirPopup=new maplibregl.Popup({closeButton:true,maxWidth:'280px',anchor:'bottom',offset:12})
+    .setLngLat([lng,lat])
+    .setHTML(`<div class="dir-title">Navigovat sem</div>
+      <div class="dir-btns">
+        <a class="dir-btn" href="${directionsUrl(lat,lng,'driving')}" target="_blank" rel="noopener">Autem</a>
+        <a class="dir-btn" href="${directionsUrl(lat,lng,'transit')}" target="_blank" rel="noopener">MHD</a>
+        <a class="dir-btn" href="${directionsUrl(lat,lng,'walking')}" target="_blank" rel="noopener">Pěšky</a>
+      </div>`)
+    .addTo(map);
+  dirPopup.on('close',()=>{dirPopup=null;});
+}
+
+function drillIn(idx){
+  if(selectedIdx===idx) return;
+  // clear previous selection state
+  if(selectedIdx>=0) map.setFeatureState({source:'hex',id:selectedIdx},{selected:false});
+  if(dirPopup){dirPopup.remove();dirPopup=null;}
+  if(infoPopup){infoPopup.remove();infoPopup=null;}
+  selectedIdx=idx;
+  map.setFeatureState({source:'hex',id:idx},{selected:true});
+  const p=points[idx];
+  // zoom to the hex with generous top padding so the popup sits above it, not over the interior
+  map.fitBounds(hexBounds(p),{padding:{top:200,bottom:40,left:40,right:40},maxZoom:map.getMaxZoom(),essential:true});
+  // popup anchored at the top edge of the hex so it appears above and doesn't block the interior
+  const r=score(DATA[idx], PAST+dayOffset);
+  const smPct=+(r.sm*100).toFixed(0);
+  infoPopup=new maplibregl.Popup({closeButton:true,maxWidth:'280px',anchor:'bottom',offset:8})
+    .setLngLat([p.lon, p.lat + R_LAT])
+    .setHTML(`<div class="pp-score" style="color:${colour(r.s)}">${r.s}</div>
+      <div class="pp-verdict">${verdict(r.s)}</div>
+      <div class="pp-row"><span>Srážkový impuls (14 d, vážený)</span><b>${r.rain} mm</b></div>
+      <div class="pp-row"><span>Půdní vlhkost 0–7 cm</span><b>${smPct} %</b></div>
+      <div class="pp-row"><span>Průměrná teplota</span><b>${r.tm} °C</b></div>`)
+    .addTo(map);
+  infoPopup.on('close',()=>{
+    // popup close is one of the exit affordances
+    if(selectedIdx===idx) exitDrillIn();
+  });
+}
+
+function exitDrillIn(){
+  if(selectedIdx>=0){
+    map.setFeatureState({source:'hex',id:selectedIdx},{selected:false});
+    selectedIdx=-1;
+  }
+  if(infoPopup){const p=infoPopup;infoPopup=null;p.remove();}
+  if(dirPopup){const p=dirPopup;dirPopup=null;p.remove();}
 }
 
 function refresh(){
@@ -449,19 +567,37 @@ function refresh(){
   else{
     map.addSource('hex',{type:'geojson',data:gj});
     map.addLayer({id:'hex-fill',type:'fill',source:'hex',
-      paint:{'fill-color':['get','color'],'fill-opacity':0.78}});
+      paint:{
+        'fill-color':['get','color'],
+        // transparent when drilled in so the underlying basemap shows through
+        'fill-opacity':['case',['boolean',['feature-state','selected'],false], 0, 0.78]
+      }});
     map.addLayer({id:'hex-line',type:'line',source:'hex',
-      paint:{'line-color':'#171a12','line-width':0.8,'line-opacity':0.6}});
+      paint:{
+        // thicker, brighter border when the hex is drilled in
+        'line-color':['case',['boolean',['feature-state','selected'],false], '#ffffff', '#171a12'],
+        'line-width':['case',['boolean',['feature-state','selected'],false], 5, 0.8],
+        'line-opacity':['case',['boolean',['feature-state','selected'],false], 1, 0.6]
+      }});
     map.on('click','hex-fill',e=>{
-      const f=e.features[0].properties;
-      new maplibregl.Popup({closeButton:true,maxWidth:'280px'})
-        .setLngLat(e.lngLat)
-        .setHTML(`<div class="pp-score" style="color:${colour(f.score)}">${f.score}</div>
-          <div class="pp-verdict">${verdict(f.score)}</div>
-          <div class="pp-row"><span>Srážkový impuls (14 d, vážený)</span><b>${f.rain} mm</b></div>
-          <div class="pp-row"><span>Půdní vlhkost 0–7 cm</span><b>${f.sm} %</b></div>
-          <div class="pp-row"><span>Průměrná teplota</span><b>${f.tm} °C</b></div>`)
-        .addTo(map);
+      const idx=e.features[0].id;
+      if(idx===selectedIdx){
+        // click INSIDE the already-drilled hex → show directions at click point
+        showDirectionsPopup(e.lngLat);
+      }else{
+        // drill in (or switch drill-in to another hex)
+        drillIn(idx);
+      }
+    });
+    // click outside any hex (e.g. Slovak side of the border, sea, gutter) exits drill-in
+    map.on('click',e=>{
+      if(selectedIdx<0) return;
+      const hits=map.queryRenderedFeatures(e.point,{layers:['hex-fill']});
+      if(hits.length===0) exitDrillIn();
+    });
+    // ESC as a keyboard exit affordance
+    document.addEventListener('keydown',e=>{
+      if(e.key==='Escape' && selectedIdx>=0) exitDrillIn();
     });
     map.on('mouseenter','hex-fill',()=>map.getCanvas().style.cursor='pointer');
     map.on('mouseleave','hex-fill',()=>map.getCanvas().style.cursor='');
@@ -480,7 +616,7 @@ function buildDayChips(){
     b.className='day'+(d===dayOffset?' on':'');
     b.innerHTML=(d===0?'Dnes':d===1?'Zítra':names[dow])
       +`<small>${dt.getDate()}.${dt.getMonth()+1}.</small>`;
-    b.onclick=()=>{dayOffset=d;buildDayChips();refresh();};
+    b.onclick=()=>{dayOffset=d;exitDrillIn();buildDayChips();refresh();};
     el.appendChild(b);
   }
 }

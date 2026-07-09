@@ -586,17 +586,51 @@ function exitDrillIn(){
   if(dirPopup){const p=dirPopup;dirPopup=null;p.remove();}
 }
 
+// Green forest overlay on top of the dark basemap. Data: OpenFreeMap's
+// OpenMapTiles vector tiles (free, no API key). We render `landcover`
+// class=wood and the `park` layer in dark green so forests read as green
+// against the dark-matter base — mushroom-hunting relevance.
+function initForestOverlay(){
+  if(map.getSource('ofm')) return;
+  map.addSource('ofm',{type:'vector',url:'https://tiles.openfreemap.org/planet'});
+  // wood/forest polygons — opacity ramps up with zoom so forests read subtly
+  // in the country overview and prominently once you drill into a hex.
+  map.addLayer({
+    id:'forest-wood',type:'fill',source:'ofm','source-layer':'landcover',
+    filter:['==',['get','class'],'wood'],
+    paint:{
+      'fill-color':'#1e6b3a',
+      'fill-opacity':['interpolate',['linear'],['zoom'],6,0.45,9,0.7,12,0.85]
+    }
+  });
+  // parks / protected areas — much subtler tint so they don't overshadow real woods
+  map.addLayer({
+    id:'forest-park',type:'fill',source:'ofm','source-layer':'park',
+    paint:{
+      'fill-color':'#1e6b3a',
+      'fill-opacity':['interpolate',['linear'],['zoom'],6,0.15,10,0.3]
+    }
+  });
+}
+
 function refresh(){
   const gj=buildGeoJSON();
   const src=map.getSource('hex');
   if(src) src.setData(gj);
   else{
+    // forest layers first so hex layers render on top
+    initForestOverlay();
     map.addSource('hex',{type:'geojson',data:gj});
     map.addLayer({id:'hex-fill',type:'fill',source:'hex',
       paint:{
         'fill-color':['get','color'],
-        // transparent when drilled in so the underlying basemap shows through
-        'fill-opacity':['case',['boolean',['feature-state','selected'],false], 0, 0.78]
+        // transparent when drilled in so the underlying basemap + forests show through;
+        // in the overview, ease from 0.78 (readable colours) at low zoom down to 0.55 at
+        // high zoom so forests bleed through around the drilled-in area.
+        'fill-opacity':['case',
+          ['boolean',['feature-state','selected'],false], 0,
+          ['interpolate',['linear'],['zoom'],6,0.78,9,0.7,12,0.55]
+        ]
       }});
     map.addLayer({id:'hex-line',type:'line',source:'hex',
       paint:{
